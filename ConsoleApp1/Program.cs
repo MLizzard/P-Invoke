@@ -2,99 +2,61 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 
+public delegate double DoubleDoubleDelegate(double x);
+
 class Program
 {
-    // Определение структур
-    public struct IntegrationData
+    public struct IntegrationParameters
     {
-        public double a, b;
-        public int n;
+        public double LowerBound;
+        public double UpperBound;
+        public int NumberOfPoints;
     }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct LinearSystem
-    {
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 12)]
-        public double[] matrix;
-
-        public double this[int row, int col]
-        {
-            get => matrix[row * 4 + col];
-            set => matrix[row * 4 + col] = value;
-        }
-    }
-
-    // Подключение функций из C
-    [DllImport("C_Library.dll", CallingConvention = CallingConvention.Cdecl)]
-    public static extern double newton_method_c(IntegrationData data);
 
     [DllImport("C_Library.dll", CallingConvention = CallingConvention.Cdecl)]
-    public static extern double simpson_method_c(ref IntegrationData data);
+    public static extern double monte_carlo_integration_c(ref IntegrationParameters params_c, [MarshalAs(UnmanagedType.FunctionPtr)] DoubleDoubleDelegate func);
 
     [DllImport("C_Library.dll", CallingConvention = CallingConvention.Cdecl)]
-    public static extern void gauss_elimination_c(ref LinearSystem system, double[] result);
-
-    // Подключение функций из C++
-    [DllImport("C++_Library.dll", CallingConvention = CallingConvention.Cdecl)]
-    public static extern double newton_method_cpp(IntegrationData data);
+    public static extern double sin_function_c(double x);
+    [DllImport("C_Library.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern double cos_function_c(double x);
 
     [DllImport("C++_Library.dll", CallingConvention = CallingConvention.Cdecl)]
-    public static extern double simpson_method_cpp(ref IntegrationData data);
+    public static extern double monte_carlo_integration_cpp(ref IntegrationParameters params_cpp, [MarshalAs(UnmanagedType.FunctionPtr)] DoubleDoubleDelegate func);
 
     [DllImport("C++_Library.dll", CallingConvention = CallingConvention.Cdecl)]
-    public static extern void gauss_elimination_cpp(ref LinearSystem system, double[] result);
+    public static extern double sin_function_cpp(double x);
+    [DllImport("C++_Library.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern double cos_function_cpp(double x);
 
-    // Реализация функций на C#
-    static double NewtonMethodCS(IntegrationData data)
+    [DllImport("C++_Library.dll", CallingConvention = CallingConvention.Cdecl)]
+    public static extern void test_cpp(int times);
+
+    // Реализация метода Монте-Карло на C#
+    static double MonteCarloIntegrationCS(ref IntegrationParameters parameters, Func<double, double> func)
     {
-        double x = (data.a + data.b) / 2;
-        for (int i = 0; i < data.n; i++)
+        Random rand = new Random();
+        double sum = 0;
+        for (int i = 0; i < parameters.NumberOfPoints; i++)
         {
-            x = x - (x * x - 2) / (2 * x);
+            double x = parameters.LowerBound + (parameters.UpperBound - parameters.LowerBound) * rand.NextDouble();
+            sum += func(x);
         }
-        return x;
+        return (parameters.UpperBound - parameters.LowerBound) * sum / parameters.NumberOfPoints;
     }
 
-    static double SimpsonMethodCS(ref IntegrationData data)
+    // Пример функции для интегрирования на C#
+    static double SinFunctionCS(double x)
     {
-        double a = data.a, b = data.b;
-        int n = data.n;
-        double h = (b - a) / n;
-        double sum = Math.Sin(a) + Math.Sin(b);
-
-        for (int i = 1; i < n; i += 2)
-            sum += 4 * Math.Sin(a + i * h);
-        for (int i = 2; i < n; i += 2)
-            sum += 2 * Math.Sin(a + i * h);
-
-        return (h / 3) * sum;
+        return Math.Sin(x);
     }
 
-    static void GaussEliminationCS(ref LinearSystem system, double[] result)
+    // Пример еще одной функции для интегрирования на C#
+    static double CosFunctionCS(double x)
     {
-        int size = 3;
-        for (int i = 0; i < size; i++)
-        {
-            for (int j = i + 1; j < size; j++)
-            {
-                double ratio = system[j, i] / system[i, i];
-                for (int k = 0; k <= size; k++)
-                    system[j, k] -= ratio * system[i, k];
-            }
-        }
-
-        for (int i = size - 1; i >= 0; i--)
-        {
-            result[i] = system[i, size];
-            for (int j = i + 1; j < size; j++)
-                result[i] -= system[i, j] * result[j];
-            result[i] /= system[i, i];
-        }
+        return Math.Cos(x);
     }
 
- 
-
-    // Функция для замера времени выполнения
     static (double, long) MeasureTime(Func<double> func)
     {
         Stopwatch sw = Stopwatch.StartNew();
@@ -105,60 +67,41 @@ class Program
 
     static void Main()
     {
-        IntegrationData data = new IntegrationData { a = 10.0, b = 20.0, n = 10000000 };
-        LinearSystem system = new LinearSystem
+        IntegrationParameters parameters = new IntegrationParameters
         {
-            matrix = new double[12]
+            LowerBound = 0.0,
+            UpperBound = Math.PI,
+            NumberOfPoints = 10000000 // Большое количество точек
         };
 
-        // Заполнение матрицы
-        system[0, 0] = 2; system[0, 1] = -1; system[0, 2] = 1; system[0, 3] = 3;
-        system[1, 0] = 1; system[1, 1] = 3; system[1, 2] = 2; system[1, 3] = 1;
-        system[2, 0] = 1; system[2, 1] = -1; system[2, 2] = 2; system[2, 3] = 0;
+        test_cpp(5);
 
-        double[] result = new double[3];
-
-        Console.WriteLine("Сравнение выполнения функций на C#, C и C++:");
-
-        // Метод Ньютона
-        var (csNewton, csTimeNewton) = MeasureTime(() => NewtonMethodCS(data));
-        var (cNewton, cTimeNewton) = MeasureTime(() => newton_method_c(data));
-        var (cppNewton, cppTimeNewton) = MeasureTime(() => newton_method_cpp(data));
-
-        Console.WriteLine($"Newton C#: {csNewton}, Time: {csTimeNewton} ms");
-        Console.WriteLine($"Newton C:  {cNewton}, Time: {cTimeNewton} ms");
-        Console.WriteLine($"Newton C++: {cppNewton}, Time: {cppTimeNewton} ms");
+        Console.WriteLine("Замер времени выполнения метода Монте-Карло:");
+        Console.WriteLine($"Интегрирование от {parameters.LowerBound} до {parameters.UpperBound} с {parameters.NumberOfPoints} точками.");
         Console.WriteLine();
 
-        // Метод Симпсона
-        var (csSimpson, csTimeSimpson) = MeasureTime(() => SimpsonMethodCS(ref data));
-        var (cSimpson, cTimeSimpson) = MeasureTime(() => simpson_method_c(ref data));
-        var (cppSimpson, cppTimeSimpson) = MeasureTime(() => simpson_method_cpp(ref data));
+        // 1. C# - интегрирование Sin
+        var (resultCS_Sin, timeCS_Sin) = MeasureTime(() => MonteCarloIntegrationCS(ref parameters, SinFunctionCS));
+        Console.WriteLine($"C# - Sin(x): Result = {resultCS_Sin:F8}, Time = {timeCS_Sin} ms");
 
-        Console.WriteLine($"Simpson C#: {csSimpson}, Time: {csTimeSimpson} ms");
-        Console.WriteLine($"Simpson C:  {cSimpson}, Time: {cTimeSimpson} ms");
-        Console.WriteLine($"Simpson C++: {cppSimpson}, Time: {cppTimeSimpson} ms");
-        Console.WriteLine();
+        // 2. C# - интегрирование Cos
+        var (resultCS_Cos, timeCS_Cos) = MeasureTime(() => MonteCarloIntegrationCS(ref parameters, CosFunctionCS));
+        Console.WriteLine($"C# - Cos(x): Result = {resultCS_Cos:F8}, Time = {timeCS_Cos} ms");
 
-        // Метод Гаусса
-        Stopwatch sw = Stopwatch.StartNew();
-        GaussEliminationCS(ref system, result);
-        sw.Stop();
-        long csTimeGauss = sw.ElapsedMilliseconds;
-        Console.WriteLine($"Gauss C#: [{string.Join(", ", result)}], Time: {csTimeGauss} ms");
+        // 3. C++ - интегрирование Sin
+        var (resultCpp_Sin, timeCpp_Sin) = MeasureTime(() => monte_carlo_integration_cpp(ref parameters, new DoubleDoubleDelegate(sin_function_cpp)));
+        Console.WriteLine($"C++ - Sin(x): Result = {resultCpp_Sin:F8}, Time = {timeCpp_Sin} ms");
 
-        sw.Restart();
-        gauss_elimination_c(ref system, result);
-        sw.Stop();
-        long cTimeGauss = sw.ElapsedMilliseconds;
-        Console.WriteLine($"Gauss C:  [{string.Join(", ", result)}], Time: {cTimeGauss} ms");
+        // 4. C++ - интегрирование Cos
+        var (resultCpp_Cos, timeCpp_Cos) = MeasureTime(() => monte_carlo_integration_cpp(ref parameters, new DoubleDoubleDelegate(cos_function_cpp)));
+        Console.WriteLine($"C++ - Cos(x): Result = {resultCpp_Cos:F8}, Time = {timeCpp_Cos} ms");
 
-        sw.Restart();
-        gauss_elimination_cpp(ref system, result);
-        sw.Stop();
-        long cppTimeGauss = sw.ElapsedMilliseconds;
-        Console.WriteLine($"Gauss C++: [{string.Join(", ", result)}], Time: {cppTimeGauss} ms");
+        // 5. C - интегрирование Sin
+        var (resultC_Sin, timeC_Sin) = MeasureTime(() => monte_carlo_integration_c(ref parameters, new DoubleDoubleDelegate(sin_function_c)));
+        Console.WriteLine($"C - Sin(x): Result = {resultC_Sin:F8}, Time = {timeC_Sin} ms");
 
-       
+        // 6. C - интегрирование Cos
+        var (resultC_Cos, timeC_Cos) = MeasureTime(() => monte_carlo_integration_c(ref parameters, new DoubleDoubleDelegate(cos_function_c)));
+        Console.WriteLine($"C - Cos(x): Result = {resultC_Cos:F8}, Time = {timeC_Cos} ms");
     }
 }
