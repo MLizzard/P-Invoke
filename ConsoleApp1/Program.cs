@@ -79,13 +79,17 @@ public static class NativeConfig
         { "test_cpp", ("C++_Library", typeof(test_cpp)) }
     };
 }
+
 public static class NativeLoader
 {
     private static readonly Dictionary<string, IntPtr> _libraryHandles = new();
     private static readonly Dictionary<string, Delegate> _delegates = new();
+    private static bool _initialized = false;
 
     public static void Init()
     {
+        if (_initialized) return;
+
         // Загружаем все библиотеки, указанные в конфиге
         var requiredLibs = new HashSet<string>();
         foreach (var (_, (lib, _)) in NativeConfig.FunctionMap)
@@ -93,17 +97,59 @@ public static class NativeLoader
 
         foreach (string lib in requiredLibs)
         {
-            string libName = GetPlatformSpecificLibName(lib);
-            _libraryHandles[lib] = NativeLibrary.Load(libName);
+            LoadLibraryWithRetry(lib);
         }
 
         // Загружаем функции
         foreach (var (funcName, (lib, delegateType)) in NativeConfig.FunctionMap)
         {
-            IntPtr libHandle = _libraryHandles[lib];
-            IntPtr funcPtr = NativeLibrary.GetExport(libHandle, funcName);
-            var del = Marshal.GetDelegateForFunctionPointer(funcPtr, delegateType);
-            _delegates[funcName] = del;
+            if (!_libraryHandles.ContainsKey(lib)) continue;
+
+            try
+            {
+                IntPtr funcPtr = NativeLibrary.GetExport(_libraryHandles[lib], funcName);
+                var del = Marshal.GetDelegateForFunctionPointer(funcPtr, delegateType);
+                _delegates[funcName] = del;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to load function '{funcName}' from library '{lib}': {ex.Message}");
+            }
+        }
+
+        _initialized = true;
+    }
+
+    private static void LoadLibraryWithRetry(string lib)
+    {
+        while (true)
+        {
+            try
+            {
+                string libName = GetPlatformSpecificLibName(lib);
+                Console.WriteLine($"Attempting to load library: {libName}");
+                _libraryHandles[lib] = NativeLibrary.Load(libName);
+                Console.WriteLine($"Successfully loaded: {libName}");
+                break;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to load library '{lib}': {ex.Message}");
+                Console.WriteLine($"Please ensure '{GetPlatformSpecificLibName(lib)}' exists in:");
+                Console.WriteLine($"   - Application directory: {AppDomain.CurrentDomain.BaseDirectory}");
+                Console.WriteLine("Possible solutions:");
+                Console.WriteLine("   1. Check file exists and has correct permissions");
+                Console.WriteLine("   2. Verify architecture (x64/x86) matches");
+                Console.WriteLine("   3. Install required runtime dependencies");
+                Console.WriteLine("\nPress any key to retry or 'Q' to skip this library...");
+
+                var key = Console.ReadKey(intercept: true);
+                if (key.Key == ConsoleKey.Q)
+                {
+                    Console.WriteLine($"⏩ Skipping library '{lib}'");
+                    return;
+                }
+            }
         }
     }
 
@@ -111,7 +157,21 @@ public static class NativeLoader
     {
         if (_delegates.TryGetValue(name, out var del))
             return (T)del;
-        throw new InvalidOperationException($"Function '{name}' not found.");
+
+        throw new InvalidOperationException($"Function '{name}' not loaded. Reason: " +
+            (_initialized ? "function not found in loaded libraries" : "libraries not initialized"));
+    }
+
+    private static string GetPlatformSpecificLibName(string shortName)
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return $"{shortName}.dll";
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            return $"lib{shortName}.so";
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            return $"lib{shortName}.dylib";
+
+        throw new PlatformNotSupportedException("Unsupported operating system");
     }
 
     public static void Cleanup()
@@ -120,13 +180,6 @@ public static class NativeLoader
             NativeLibrary.Free(handle);
         _libraryHandles.Clear();
         _delegates.Clear();
-    }
-
-    private static string GetPlatformSpecificLibName(string shortName)
-    {
-        return RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? $"{shortName}.dll"
-            : $"lib{shortName}.so";
     }
 }
 class Program
@@ -214,72 +267,72 @@ class Program
     }
     static IntegrationParameters GetIntegrationParameters(IntegrationParameters defaults)
     {
-        Console.Write("Хотите ввести параметры интегрирования? (y/n): ");
+        Console.Write("Do you want to enter params of integration? (y/n): ");
         string? input = Console.ReadLine();
 
         if (input?.ToLower() == "y")
         {
-            Console.Write("Введите нижнюю границу (a): ");
+            Console.Write("Enter lower border (a): ");
             double a = double.Parse(Console.ReadLine()!);
 
-            Console.Write("Введите верхнюю границу (b): ");
+            Console.Write("Enter higher border (b): ");
             double b = double.Parse(Console.ReadLine()!);
 
-            Console.Write("Введите количество точек: ");
+            Console.Write("Enter number of points: ");
             int n = int.Parse(Console.ReadLine()!);
 
             return new IntegrationParameters { LowerBound = a, UpperBound = b, NumberOfPoints = n };
         }
 
-        Console.WriteLine("Используются значения по умолчанию.");
+        Console.WriteLine("Using default params.");
         return defaults;
     }
 
     static IntegrationData GetIntegrationData(IntegrationData defaults)
     {
-        Console.Write("Хотите ввести свои данные? (y/n): ");
+        Console.Write("Do you want to enter your params? (y/n): ");
         string? input = Console.ReadLine();
 
         if (input?.ToLower() == "y")
         {
-            Console.Write("Введите нижнюю границу (a): ");
+            Console.Write("Enter lower border (a): ");
             double a = double.Parse(Console.ReadLine()!);
 
-            Console.Write("Введите верхнюю границу (b): ");
+            Console.Write("Enter higher border (b): ");
             double b = double.Parse(Console.ReadLine()!);
 
-            Console.Write("Введите количество интервалов (n): ");
+            Console.Write("Enter number of points (n): ");
             int n = int.Parse(Console.ReadLine()!);
 
             return new IntegrationData { a = a, b = b, n = n };
         }
 
-        Console.WriteLine("Используются значения по умолчанию.");
+        Console.WriteLine("Using default params.");
         return defaults;
     }
 
     static LinearSystem GetLinearSystem(LinearSystem defaults)
     {
-        Console.Write("Хотите ввести свою систему? (y/n): ");
+        Console.Write("Do you want to enter your system? (y/n): ");
         string? input = Console.ReadLine();
 
         if (input?.ToLower() != "y")
         {
-            Console.WriteLine("Используется система по умолчанию.");
+            Console.WriteLine("Using default system.");
             return defaults;
         }
 
         double[] matrix = new double[12];
-        Console.WriteLine("Введите коэффициенты системы (3 уравнения, по 4 значения в каждом: A, B, C, D):");
+        Console.WriteLine("Enter coefficient (3 equations, 4 numbers in everyone: A, B, C, D):");
         for (int i = 0; i < 3; i++)
         {
-            Console.Write($"Уравнение {i + 1}: ");
+            Console.Write($"Equation {i + 1}: ");
             string? line = Console.ReadLine();
             string[] parts = line?.Split(' ', StringSplitOptions.RemoveEmptyEntries) ?? Array.Empty<string>();
 
             if (parts.Length != 4)
             {
-                Console.WriteLine("Ошибка ввода. Ожидалось 4 значения.");
+                Console.WriteLine("Error of input. Expected 4 numbers.");
                 i--; // Повтор ввода строки
                 continue;
             }
@@ -288,7 +341,7 @@ class Program
             {
                 if (!double.TryParse(parts[j], out matrix[i * 4 + j]))
                 {
-                    Console.WriteLine("Ошибка ввода числа.");
+                    Console.WriteLine("Error of number input.");
                     i--; // Повтор строки
                     break;
                 }
@@ -323,14 +376,14 @@ class Program
 
         while (true)
         {
-            Console.WriteLine("Выберите алгоритм для тестирования:");
+            Console.WriteLine("Enter algorithm for testing:");
             Console.WriteLine("1 - Monte Carlo");
             Console.WriteLine("2 - Newton Method");
             Console.WriteLine("3 - Simpson Method");
             Console.WriteLine("4 - Gauss Elimination");
-            Console.WriteLine("0 - Выход");
+            Console.WriteLine("0 - Escape");
 
-            Console.Write("Введите номер: ");
+            Console.Write("Enter a number: ");
             string? choice = Console.ReadLine();
 
             switch (choice)
@@ -339,10 +392,10 @@ class Program
                     return;
 
                 case "1":
-                    Console.WriteLine("\nВыберите функцию для интегрирования:");
+                    Console.WriteLine("\nEnter fuction for integration:");
                     Console.WriteLine("1 - sin(x)");
                     Console.WriteLine("2 - cos(x)");
-                    Console.Write("Введите номер: ");
+                    Console.Write("Enter a number: ");
                     string funcChoice = Console.ReadLine();
 
                     IntegrationParameters mcParams = GetIntegrationParameters(parameters);
@@ -383,7 +436,7 @@ class Program
                             break;
 
                         default:
-                            Console.WriteLine("Неизвестная функция.");
+                            Console.WriteLine("Uknown function.");
                             break;
                     }
                     break;
@@ -447,7 +500,7 @@ class Program
                     break;
 
                 default:
-                    Console.WriteLine("Неизвестный выбор.");
+                    Console.WriteLine("Uknown choice.");
                     break;
             }
 
